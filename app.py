@@ -6,23 +6,38 @@ import requests
 # --- 1. PAGE SETUP ---
 st.set_page_config(page_title="Kunal Wealth-Tech | Pro", page_icon="🦁", layout="wide")
 
-# --- 2. SMART CACHING (The Fix) ---
-# Ye function data ko 1 ghante tak save rakhega taaki Rate Limit na aaye
-@st.cache_data(ttl=3600) 
-def fetch_stock_data(symbol):
+# Custom CSS
+st.markdown("""
+    <style>
+    .stApp { background-color: #f8f9fa; }
+    .metric-card {
+        background-color: white; padding: 20px; border-radius: 12px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-top: 5px solid #1E88E5;
+        text-align: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. FIXED CACHING LOGIC ---
+@st.cache_data(ttl=3600) # 1 hour cache
+def get_clean_data(symbol):
     try:
-        stock = yf.Ticker(symbol)
-        # HACK: Info fetch karne se pehle history call karne se block kam hote hain
-        _ = stock.history(period="1d") 
-        return stock.info, stock
+        ticker = yf.Ticker(symbol)
+        # Sirf zaroori data fetch karo (Serializable data)
+        info = ticker.info
+        hist_1mo = ticker.history(period="1mo")['Close']
+        hist_1y = ticker.history(period="1y")['Close']
+        hist_max = ticker.history(period="max")['Close']
+        
+        return info, hist_1mo, hist_1y, hist_max
     except:
-        return None, None
+        return None, None, None, None
 
 def get_suggestions(query):
     if len(query) < 2: return []
     try:
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers).json()
         return [f"{q['longname']} ({q['symbol']})" for q in response.get('quotes', []) if '.NS' in q.get('symbol', '')]
     except: return []
@@ -38,15 +53,15 @@ with st.sidebar:
 
 # --- 4. MAIN DASHBOARD ---
 if selected_stock:
-    ticker = selected_stock.split('(')[-1].replace(')', '')
+    ticker_symbol = selected_stock.split('(')[-1].replace(')', '')
     
-    # Using the Cached function
-    info, stock_obj = fetch_stock_data(ticker)
+    # Fetching only clean data
+    info, h1m, h1y, hmax = get_clean_data(ticker_symbol)
 
     if info and 'currentPrice' in info:
-        st.title(f"📈 {info.get('longName', ticker)}")
+        st.title(f"📈 {info.get('longName', ticker_symbol)}")
         
-        # KEY METRICS ROW
+        # Row 1: Key Metrics
         m1, m2, m3, m4 = st.columns(4)
         with m1: st.metric("Live Price", f"₹{info.get('currentPrice', 0):,.2f}")
         with m2: st.metric("Market Cap", f"{info.get('marketCap', 0)/1e7:,.0f} Cr")
@@ -55,26 +70,26 @@ if selected_stock:
 
         st.divider()
 
-        # TIME FRAME TABS
+        # Row 2: Performance Tabs
         tab1, tab2, tab3 = st.tabs(["1 Month", "1 Year", "Max History"])
-        
-        with tab1:
-            st.area_chart(stock_obj.history(period="1mo")['Close'])
-        with tab2:
-            st.area_chart(stock_obj.history(period="1y")['Close'])
-        with tab3:
-            st.area_chart(stock_obj.history(period="max")['Close'])
+        with tab1: st.area_chart(h1m)
+        with tab2: st.area_chart(h1y)
+        with tab3: st.area_chart(hmax)
 
         st.divider()
         
-        # FUNDAMENTAL VERDICT
-        debt = info.get('debtToEquity', 0)
-        if debt < 100:
-            st.success(f"💎 **ASSET:** Debt/Equity is {debt:.2f} (Low)")
-        else:
-            st.warning(f"⚠️ **LIABILITY:** Debt/Equity is {debt:.2f} (High)")
+        # Row 3: Verdict & About
+        l, r = st.columns(2)
+        with l:
+            st.subheader("👨‍🏫 Kunal's Verdict")
+            debt = info.get('debtToEquity', 0)
+            if debt < 100: st.success(f"💎 **ASSET:** Low Debt ({debt:.2f})")
+            else: st.warning(f"⚠️ **LIABILITY:** High Debt ({debt:.2f})")
+        with r:
+            st.subheader("About")
+            st.write(info.get('longBusinessSummary', 'No summary available.')[:350] + "...")
 
     else:
-        st.error("Yahoo Finance is temporarily busy. Please wait 2 minutes and try again.")
+        st.error("Data fetch nahi ho raha. 2-3 minute baad try karein ya 'Manage App' mein jaake 'Reboot' karein.")
 
 st.markdown("<br><hr><center>Developed by Kunal Wealth-Tech © 2026</center>", unsafe_allow_html=True)
