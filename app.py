@@ -3,35 +3,39 @@ import yfinance as yf
 import pandas as pd
 import requests
 
-# --- 1. PAGE SETUP ---
-st.set_page_config(page_title="Kunal Wealth-Tech | Pro", page_icon="🦁", layout="wide")
+# --- 1. NSE STYLE CONFIG ---
+st.set_page_config(page_title="Kunal Wealth-Tech | NSE Mode", page_icon="🏦", layout="wide")
 
-# Custom CSS
+# NSE Blue & Grey Theme CSS
 st.markdown("""
     <style>
-    .stApp { background-color: #f8f9fa; }
-    .metric-card {
-        background-color: white; padding: 20px; border-radius: 12px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-top: 5px solid #1E88E5;
-        text-align: center;
+    .stApp { background-color: #f0f2f5; }
+    .nse-header {
+        background-color: #003366; padding: 10px; border-radius: 5px;
+        color: white; text-align: center; font-weight: bold; margin-bottom: 20px;
     }
+    .data-table {
+        background-color: white; border-collapse: collapse; width: 100%;
+        border-radius: 10px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .metric-box {
+        border: 1px solid #dee2e6; padding: 15px; border-radius: 5px;
+        background-color: #ffffff; text-align: center;
+    }
+    .label { color: #666; font-size: 14px; font-weight: bold; }
+    .value { color: #003366; font-size: 20px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. FIXED CACHING LOGIC ---
-@st.cache_data(ttl=3600) # 1 hour cache
-def get_clean_data(symbol):
+# --- 2. LOGIC FUNCTIONS ---
+@st.cache_data(ttl=600) # 10 mins cache for live feel
+def get_nse_data(symbol):
     try:
         ticker = yf.Ticker(symbol)
-        # Sirf zaroori data fetch karo (Serializable data)
         info = ticker.info
-        hist_1mo = ticker.history(period="1mo")['Close']
-        hist_1y = ticker.history(period="1y")['Close']
-        hist_max = ticker.history(period="max")['Close']
-        
-        return info, hist_1mo, hist_1y, hist_max
-    except:
-        return None, None, None, None
+        hist = ticker.history(period="1mo")
+        return info, hist
+    except: return None, None
 
 def get_suggestions(query):
     if len(query) < 2: return []
@@ -42,54 +46,78 @@ def get_suggestions(query):
         return [f"{q['longname']} ({q['symbol']})" for q in response.get('quotes', []) if '.NS' in q.get('symbol', '')]
     except: return []
 
-# --- 3. SIDEBAR ---
-with st.sidebar:
-    st.markdown("<h1 style='text-align: center;'>🦁 KUNAL</h1>", unsafe_allow_html=True)
-    st.divider()
-    search_input = st.text_input("Stock Search:", value="Tata Motors")
-    options = get_suggestions(search_input)
-    selected_stock = st.selectbox("Select Stock:", options) if options else None
-    analyze_btn = st.button("🚀 Analyze Now", use_container_width=True)
+# --- 3. TOP NAVIGATION (NSE LOOK) ---
+st.markdown("<div class='nse-header'>KUNAL WEALTH-TECH | EQUITY DERIVATIVES & FUNDAMENTALS</div>", unsafe_allow_html=True)
 
-# --- 4. MAIN DASHBOARD ---
-if selected_stock:
-    ticker_symbol = selected_stock.split('(')[-1].replace(')', '')
-    
-    # Fetching only clean data
-    info, h1m, h1y, hmax = get_clean_data(ticker_symbol)
+# Sidebar Search
+with st.sidebar:
+    st.markdown("### 🔍 MARKET TRACKER")
+    search_input = st.text_input("Search Stock Name:", value="Tata Motors")
+    options = get_suggestions(search_input)
+    selected = st.selectbox("Select from NSE List:", options) if options else None
+    go = st.button("VIEW DETAILED REPORT", use_container_width=True)
+
+# --- 4. MAIN LAYOUT ---
+if selected:
+    ticker_sym = selected.split('(')[-1].replace(')', '')
+    info, hist = get_nse_data(ticker_sym)
 
     if info and 'currentPrice' in info:
-        st.title(f"📈 {info.get('longName', ticker_symbol)}")
-        
-        # Row 1: Key Metrics
-        m1, m2, m3, m4 = st.columns(4)
-        with m1: st.metric("Live Price", f"₹{info.get('currentPrice', 0):,.2f}")
-        with m2: st.metric("Market Cap", f"{info.get('marketCap', 0)/1e7:,.0f} Cr")
-        with m3: st.metric("ROE", f"{info.get('returnOnEquity', 0)*100:.1f}%")
-        with m4: st.metric("PE Ratio", f"{info.get('trailingPE', 0):.2f}")
+        # Title Row
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            st.subheader(f"{info.get('longName')} ({ticker_sym})")
+            st.caption(f"Sector: {info.get('sector')} | ISIN: {info.get('isin', 'INE000000000')}")
+        with c2:
+            st.markdown(f"<div class='metric-box'><span class='label'>Last Traded Price</span><br><span class='value'>₹{info.get('currentPrice'):,.2f}</span></div>", unsafe_allow_html=True)
 
         st.divider()
 
-        # Row 2: Performance Tabs
-        tab1, tab2, tab3 = st.tabs(["1 Month", "1 Year", "Max History"])
-        with tab1: st.area_chart(h1m)
-        with tab2: st.area_chart(h1y)
-        with tab3: st.area_chart(hmax)
-
-        st.divider()
+        # --- OPTION CHAIN STYLE LAYOUT (Side-by-Side Metrics) ---
+        st.markdown("### 📊 KEY MARKET STATISTICS")
         
-        # Row 3: Verdict & About
-        l, r = st.columns(2)
-        with l:
-            st.subheader("👨‍🏫 Kunal's Verdict")
-            debt = info.get('debtToEquity', 0)
-            if debt < 100: st.success(f"💎 **ASSET:** Low Debt ({debt:.2f})")
-            else: st.warning(f"⚠️ **LIABILITY:** High Debt ({debt:.2f})")
-        with r:
-            st.subheader("About")
-            st.write(info.get('longBusinessSummary', 'No summary available.')[:350] + "...")
+        col_a, col_b = st.columns(2)
+        
+        # Left Side (Fundamentals / 'Calls' Feel)
+        with col_a:
+            data_left = {
+                "Metric": ["Market Cap (Cr)", "P/E Ratio", "Dividend Yield", "ROE %"],
+                "Value": [
+                    f"{info.get('marketCap', 0)/1e7:,.2f}",
+                    f"{info.get('trailingPE', 0):.2f}",
+                    f"{info.get('dividendYield', 0)*100:.2f}%",
+                    f"{info.get('returnOnEquity', 0)*100:.2f}%"
+                ]
+            }
+            st.table(pd.DataFrame(data_left))
+
+        # Right Side (Price Range / 'Puts' Feel)
+        with col_b:
+            data_right = {
+                "Price Statistics": ["52 Week High", "52 Week Low", "Day High", "Day Low"],
+                "Value": [
+                    f"₹{info.get('fiftyTwoWeekHigh', 0):,.2f}",
+                    f"₹{info.get('fiftyTwoWeekLow', 0):,.2f}",
+                    f"₹{info.get('dayHigh', 0):,.2f}",
+                    f"₹{info.get('dayLow', 0):,.2f}"
+                ]
+            }
+            st.table(pd.DataFrame(data_right))
+
+        # --- CHART SECTION ---
+        st.markdown("### 📈 INTRADAY / HISTORICAL CHART")
+        st.area_chart(hist['Close'])
+
+        # --- VERDICT ---
+        st.divider()
+        debt = info.get('debtToEquity', 0)
+        if debt < 100:
+            st.success(f"✅ NSE ANALYSIS: Strong Fundamentals. Debt/Equity ({debt:.2f}) is stable.")
+        else:
+            st.warning(f"⚠️ NSE ANALYSIS: High Leverage Detected. Debt/Equity ({debt:.2f}) is above average.")
 
     else:
-        st.error("Data fetch nahi ho raha. 2-3 minute baad try karein ya 'Manage App' mein jaake 'Reboot' karein.")
+        st.error("Server busy! Please refresh after 10 seconds.")
 
-st.markdown("<br><hr><center>Developed by Kunal Wealth-Tech © 2026</center>", unsafe_allow_html=True)
+# Footer
+st.markdown("<br><hr><center>Market data as per NSE India Guidelines | Powered by Kunal Wealth-Tech</center>", unsafe_allow_html=True)
