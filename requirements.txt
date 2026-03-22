@@ -1,3 +1,4 @@
 streamlit
 yfinance
 pandas
+pip install pandas-ta fundamentalanalysis plotly
