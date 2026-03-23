@@ -2,6 +2,3 @@ streamlit
 yfinance
 pandas
 plotly
-requests
-pytz
-thefuzz
