@@ -1,93 +1,83 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import plotly.graph_objects as go
+from thefuzz import process # Spelling correction ke liye
 import requests
-from requests import Session
 
-# --- 1. UI SETUP ---
-st.set_page_config(page_title="Kunal Elite Terminal", layout="wide")
+# --- 1. SMART SEARCH DATABASE ---
+# Ye list NSE ke popular stocks ki hai, ise hum dynamic bhi bana sakte hain
+COMMON_STOCKS = {
+    "Reliance Industries": "RELIANCE.NS",
+    "Tata Motors": "TATAMOTORS.NS",
+    "Zomato": "ZOMATO.NS",
+    "State Bank of India": "SBIN.NS",
+    "TCS": "TCS.NS",
+    "Infosys": "INFY.NS",
+    "ITC": "ITC.NS",
+    "HDFC Bank": "HDFCBANK.NS",
+    "Adani Enterprises": "ADANIENT.NS",
+    "Paytm": "PAYTM.NS"
+}
+
+def smart_search(user_query):
+    # 1. Direct Search in our dictionary
+    match, score = process.extractOne(user_query, COMMON_STOCKS.keys())
+    
+    # 2. Agar match 80% se zyada sahi hai, toh wahi uthalo
+    if score > 80:
+        return COMMON_STOCKS[match]
+    
+    # 3. Agar dictionary mein nahi hai, toh Yahoo Finance API se pucho
+    try:
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={user_query}"
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
+        for q in res.get('quotes', []):
+            if '.NS' in q['symbol']: # Sirf Indian Stocks
+                return q['symbol']
+    except:
+        pass
+    
+    # 4. Last resort: Bas .NS laga do
+    clean_query = user_query.upper().replace(" ", "")
+    if not clean_query.endswith(".NS"):
+        clean_query += ".NS"
+    return clean_query
+
+# --- 2. UI SETUP ---
+st.set_page_config(page_title="Kunal Smart Terminal", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background: #050a14; color: #ffffff; }
-    .header-text { color: #ffd700; font-size: 35px; font-weight: bold; text-align: center; margin-bottom: 20px; }
-    .kiyosaki-card { background: rgba(255, 215, 0, 0.05); border: 1px solid #ffd700; padding: 20px; border-radius: 15px; }
+    .search-status { color: #ffd700; font-size: 14px; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. THE ULTIMATE ANTI-BLOCK ENGINE ---
-def get_rsi(series, period=14):
-    if len(series) < period: return pd.Series([0]*len(series))
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+st.title("🏦 KUNAL ELITE: SMART SEARCH TERMINAL")
 
-@st.cache_data(ttl=300)
-def fetch_elite_data_v2(ticker):
+# --- 3. THE SEARCH BOX ---
+raw_input = st.text_input("🔍 Type Company Name (e.g., 'tata motr' or 'reliance'):", value="Reliance")
+
+if raw_input:
+    # Auto-correction logic
+    final_ticker = smart_search(raw_input)
+    st.markdown(f"<div class='search-status'>Analyzing: <b>{final_ticker}</b> (Auto-corrected)</div>", unsafe_allow_html=True)
+
+    # --- 4. FETCH & DISPLAY ---
     try:
-        # Creating a session with real browser headers
-        session = Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
-        })
+        stock = yf.Ticker(final_ticker)
+        info = stock.info
         
-        stock = yf.Ticker(ticker, session=session)
-        
-        # Download history with a direct call to bypass some blocks
-        hist = stock.history(period="1y", interval="1d")
-        
-        if hist.empty:
-            return None, None, None, None
+        if 'currentPrice' in info:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Current Price", f"₹{info.get('currentPrice')}")
+            c2.metric("Company", info.get('longName'))
+            c3.metric("Kiyosaki Asset Score", "Positive" if info.get('freeCashflow', 0) > 0 else "Negative")
             
-        hist['RSI'] = get_rsi(hist['Close'])
-        hist['EMA50'] = hist['Close'].ewm(span=50, adjust=False).mean()
-        
-        return stock.info, hist, stock.balance_sheet, stock.cashflow
-    except Exception as e:
-        return None, None, None, None
-
-# --- 3. UI LAYOUT ---
-st.markdown("<div class='header-text'>🏦 KUNAL ELITE: FINANCIAL TERMINAL</div>", unsafe_allow_html=True)
-
-u_ticker = st.text_input("🔍 ENTER NSE SYMBOL (e.g. RELIANCE.NS):", value="TATAMOTORS.NS").upper().strip()
-
-if st.button("🚀 DEEP SCAN"):
-    with st.spinner(f"Accessing Legal Archives for {u_ticker}..."):
-        info, hist_df, bs_df, cf_df = fetch_elite_data_v2(u_ticker)
-
-    if info and hist_df is not None:
-        # --- ROW 1: QUICK ASSET CHECK ---
-        st.subheader("💰 Rich Dad Analysis")
-        c1, c2, c3, c4 = st.columns(4)
-        
-        price = info.get('currentPrice') or hist_df['Close'].iloc[-1]
-        debt = info.get('debtToEquity', 0)
-        div = info.get('dividendYield', 0) * 100
-        fcf = info.get('freeCashflow', 0)
-
-        c1.metric("Live Price", f"₹{price:,.2f}")
-        c2.metric("Debt/Equity", f"{debt:.2f}")
-        c3.metric("Dividend Yield", f"{div:.2f}%")
-        c4.metric("Free Cash Flow", f"₹{fcf/1e7:,.1f} Cr")
-
-        # Tabs
-        t_chart, t_bs, t_cf = st.tabs(["📊 CHART", "📋 BALANCE SHEET", "💸 CASH FLOW"])
-
-        with t_chart:
-            fig = go.Figure(data=[go.Candlestick(x=hist_df.index, open=hist_df['Open'], high=hist_df['High'], low=hist_df['Low'], close=hist_df['Close'])])
-            fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False)
-            st.plotly_chart(fig, use_container_width=True)
-
-        with t_bs:
-            st.dataframe(bs_df, use_container_width=True)
-
-        with t_cf:
-            st.dataframe(cf_df, use_container_width=True)
-            
-    else:
-        st.error("❌ Ticker Not Found or Yahoo Blocked. Please try: RELIANCE.NS or TCS.NS")
-
-st.markdown("<br><hr><center>© 2026 Kunal Wealth-Tech | Rich Dad Edition</center>", unsafe_allow_html=True)
+            # Show the official data
+            st.subheader("Deep Fundamentals")
+            st.dataframe(stock.balance_sheet, use_container_width=True)
+        else:
+            st.error("Bhai, ye stock nahi mil raha. Thoda sahi naam likho!")
+    except:
+        st.error("Server Busy! Please try again in a second.")
