@@ -1,47 +1,38 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from thefuzz import process # Spelling correction ke liye
+from thefuzz import process
 import requests
 
-# --- 1. SMART SEARCH DATABASE ---
-# Ye list NSE ke popular stocks ki hai, ise hum dynamic bhi bana sakte hain
-COMMON_STOCKS = {
-    "Reliance Industries": "RELIANCE.NS",
-    "Tata Motors": "TATAMOTORS.NS",
-    "Zomato": "ZOMATO.NS",
-    "State Bank of India": "SBIN.NS",
-    "TCS": "TCS.NS",
-    "Infosys": "INFY.NS",
-    "ITC": "ITC.NS",
-    "HDFC Bank": "HDFCBANK.NS",
-    "Adani Enterprises": "ADANIENT.NS",
-    "Paytm": "PAYTM.NS"
+# --- 1. SMART MAPPING ---
+# Popular Indian stocks ka short-cut database
+STOCK_MAP = {
+    "RELIANCE": "RELIANCE.NS",
+    "TATA MOTORS": "TATAMOTORS.NS",
+    "ZOMATO": "ZOMATO.NS",
+    "SBIN": "SBIN.NS",
+    "TATA STEEL": "TATASTEEL.NS",
+    "ADANI": "ADANIENT.NS",
+    "INFOSYS": "INFY.NS",
+    "PAYTM": "PAYTM.NS"
 }
 
-def smart_search(user_query):
-    # 1. Direct Search in our dictionary
-    match, score = process.extractOne(user_query, COMMON_STOCKS.keys())
+def get_clean_ticker(user_input):
+    user_input = user_input.upper().strip()
     
-    # 2. Agar match 80% se zyada sahi hai, toh wahi uthalo
-    if score > 80:
-        return COMMON_STOCKS[match]
+    # 1. Direct Check in Map
+    if user_input in STOCK_MAP:
+        return STOCK_MAP[user_input]
     
-    # 3. Agar dictionary mein nahi hai, toh Yahoo Finance API se pucho
-    try:
-        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={user_query}"
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
-        for q in res.get('quotes', []):
-            if '.NS' in q['symbol']: # Sirf Indian Stocks
-                return q['symbol']
-    except:
-        pass
+    # 2. Fuzzy Matching (Spelling mistake handling)
+    match, score = process.extractOne(user_input, list(STOCK_MAP.keys()))
+    if score > 85:
+        return STOCK_MAP[match]
     
-    # 4. Last resort: Bas .NS laga do
-    clean_query = user_query.upper().replace(" ", "")
-    if not clean_query.endswith(".NS"):
-        clean_query += ".NS"
-    return clean_query
+    # 3. Default: Bas .NS laga do agar nahi hai
+    if not user_input.endswith(".NS"):
+        return f"{user_input}.NS"
+    return user_input
 
 # --- 2. UI SETUP ---
 st.set_page_config(page_title="Kunal Smart Terminal", layout="wide")
@@ -49,35 +40,35 @@ st.set_page_config(page_title="Kunal Smart Terminal", layout="wide")
 st.markdown("""
     <style>
     .stApp { background: #050a14; color: #ffffff; }
-    .search-status { color: #ffd700; font-size: 14px; margin-bottom: 10px; }
+    .search-box { background: #1a222d; padding: 20px; border-radius: 15px; border: 1px solid #ffd700; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🏦 KUNAL ELITE: SMART SEARCH TERMINAL")
+st.title("🏦 KUNAL ELITE: NO-FRICTION SEARCH")
 
-# --- 3. THE SEARCH BOX ---
-raw_input = st.text_input("🔍 Type Company Name (e.g., 'tata motr' or 'reliance'):", value="Reliance")
+# --- 3. SEARCH INPUT ---
+user_query = st.text_input("🔍 Company ka naam likho (e.g. 'tata' or 'zomto'):", value="Reliance")
 
-if raw_input:
-    # Auto-correction logic
-    final_ticker = smart_search(raw_input)
-    st.markdown(f"<div class='search-status'>Analyzing: <b>{final_ticker}</b> (Auto-corrected)</div>", unsafe_allow_html=True)
+if user_query:
+    ticker = get_clean_ticker(user_query)
+    st.info(f"Searching for: **{ticker}**")
 
-    # --- 4. FETCH & DISPLAY ---
+    # Fetch Data
     try:
-        stock = yf.Ticker(final_ticker)
+        stock = yf.Ticker(ticker)
+        # Displaying Basic Metrics to confirm it works
         info = stock.info
-        
         if 'currentPrice' in info:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Current Price", f"₹{info.get('currentPrice')}")
-            c2.metric("Company", info.get('longName'))
-            c3.metric("Kiyosaki Asset Score", "Positive" if info.get('freeCashflow', 0) > 0 else "Negative")
+            st.success(f"Found: {info.get('longName')} | Price: ₹{info.get('currentPrice')}")
             
-            # Show the official data
-            st.subheader("Deep Fundamentals")
-            st.dataframe(stock.balance_sheet, use_container_width=True)
+            tab1, tab2 = st.tabs(["Fundamentals", "Cash Flow"])
+            with tab1:
+                st.dataframe(stock.balance_sheet, use_container_width=True)
+            with tab2:
+                st.dataframe(stock.cashflow, use_container_width=True)
         else:
-            st.error("Bhai, ye stock nahi mil raha. Thoda sahi naam likho!")
+            st.error("Bhai, symbol sahi nahi lag raha. Check karo!")
     except:
-        st.error("Server Busy! Please try again in a second.")
+        st.error("Technical Error! Refresh karke dekho.")
+
+st.markdown("<hr><center>Kunal Wealth-Tech © 2026</center>", unsafe_allow_html=True)
